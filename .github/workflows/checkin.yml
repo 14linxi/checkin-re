@@ -1,0 +1,237 @@
+name: Daily Check-in
+
+on:
+  schedule:
+    # GitHub Actions 使用 UTC；22:37 UTC = 北京时间次日 06:37
+    # 刻意避开整点和 UTC 00:00 的高峰队列
+    - cron: '37 22 * * *'
+
+  workflow_dispatch:
+    inputs:
+      run_wps:
+        description: 'WPS Office'
+        required: false
+        default: true
+        type: boolean
+      run_agentrouter:
+        description: 'Agent Router'
+        required: false
+        default: true
+        type: boolean
+      run_trae:
+        description: 'Trae CN'
+        required: false
+        default: true
+        type: boolean
+      run_workbuddy:
+        description: 'WorkBuddy'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-checkin-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate platform secrets
+        env:
+          WPS_JSON: ${{ secrets.WPS_JSON }}
+          AGENTROUTER_JSON: ${{ secrets.AGENTROUTER_JSON }}
+          TRAE_JSON: ${{ secrets.TRAE_JSON }}
+          WORKBUDDY_JSON: ${{ secrets.WORKBUDDY_JSON }}
+          TOKEN_JSON: ${{ secrets.TOKEN_JSON }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+
+          keys = ["WPS_JSON", "AGENTROUTER_JSON", "TRAE_JSON", "WORKBUDDY_JSON", "TOKEN_JSON"]
+          found = False
+          for key in keys:
+              raw = os.environ.get(key, "").strip()
+              if not raw:
+                  continue
+              found = True
+              try:
+                  json.loads(raw)
+              except json.JSONDecodeError as exc:
+                  raise SystemExit(f"❌ {key} 不是合法 JSON: {exc}")
+              print(f"✅ {key} JSON 校验通过")
+
+          if not found:
+              raise SystemExit(
+                  "❌ 未配置任何平台 Secret。请至少添加 WPS_JSON / AGENTROUTER_JSON / "
+                  "TRAE_JSON / WORKBUDDY_JSON 中的一个"
+              )
+          PY
+
+      - name: Run check-in scripts
+        env:
+          TZ: 'Asia/Shanghai'
+          # 可选：仓库变量，用于调整单任务超时和汇总长度
+          CHECKIN_TASK_TIMEOUT: ${{ vars.CHECKIN_TASK_TIMEOUT }}
+          CHECKIN_SUMMARY_MAX_CHARS: ${{ vars.CHECKIN_SUMMARY_MAX_CHARS }}
+          CHECKIN_NOTIFY_COMPACT: ${{ vars.CHECKIN_NOTIFY_COMPACT || 'true' }}
+          # 平台独立 Secret
+          WPS_JSON: ${{ secrets.WPS_JSON }}
+          AGENTROUTER_JSON: ${{ secrets.AGENTROUTER_JSON }}
+          TRAE_JSON: ${{ secrets.TRAE_JSON }}
+          WORKBUDDY_JSON: ${{ secrets.WORKBUDDY_JSON }}
+          # 兼容旧配置：整包 token.json
+          TOKEN_JSON: ${{ secrets.TOKEN_JSON }}
+          # 关闭脚本内置启动随机延迟，Actions 中无需错峰
+          TRAE_JITTER_MAX: '0'
+          WORKBUDDY_JITTER_MAX: '0'
+          # WxPusher：SPT 极简推送，或 app_token + uids/topic_ids 的长消息模式
+          WXPUSHER_SPT: ${{ secrets.WXPUSHER_SPT }}
+          WXPUSHER_APP_TOKEN: ${{ secrets.WXPUSHER_APP_TOKEN }}
+          WXPUSHER_UIDS: ${{ secrets.WXPUSHER_UIDS }}
+          WXPUSHER_TOPIC_IDS: ${{ secrets.WXPUSHER_TOPIC_IDS }}
+          WXPUSHER_MAX_CHARS: ${{ vars.WXPUSHER_MAX_CHARS }}
+          # 其他通知渠道（可选，notification.py 会自动读取）
+          BARK_PUSH: ${{ secrets.BARK_PUSH }}
+          BARK_ICON: ${{ secrets.BARK_ICON }}
+          BARK_SOUND: ${{ secrets.BARK_SOUND }}
+          BARK_GROUP: ${{ secrets.BARK_GROUP }}
+          BARK_LEVEL: ${{ secrets.BARK_LEVEL }}
+          BARK_URL: ${{ secrets.BARK_URL }}
+          SCKEY: ${{ secrets.SCKEY }}
+          SENDKEY: ${{ secrets.SENDKEY }}
+          COOLPUSH_SKEY: ${{ secrets.COOLPUSH_SKEY }}
+          QMSG_KEY: ${{ secrets.QMSG_KEY }}
+          QMSG_TYPE: ${{ secrets.QMSG_TYPE }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_USER_ID: ${{ secrets.TG_USER_ID }}
+          TG_API_HOST: ${{ secrets.TG_API_HOST }}
+          TG_PROXY: ${{ secrets.TG_PROXY }}
+          FSKEY: ${{ secrets.FSKEY }}
+          DINGTALK_ACCESS_TOKEN: ${{ secrets.DINGTALK_ACCESS_TOKEN }}
+          DINGTALK_SECRET: ${{ secrets.DINGTALK_SECRET }}
+          QYWX_KEY: ${{ secrets.QYWX_KEY }}
+          QYWX_CORPID: ${{ secrets.QYWX_CORPID }}
+          QYWX_AGENTID: ${{ secrets.QYWX_AGENTID }}
+          QYWX_CORPSECRET: ${{ secrets.QYWX_CORPSECRET }}
+          QYWX_TOUSER: ${{ secrets.QYWX_TOUSER }}
+          QYWX_MEDIA_ID: ${{ secrets.QYWX_MEDIA_ID }}
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+          PUSHPLUS_TOPIC: ${{ secrets.PUSHPLUS_TOPIC }}
+          PUSHDEER_PUSHKEY: ${{ secrets.PUSHDEER_PUSHKEY }}
+          GOTIFY_URL: ${{ secrets.GOTIFY_URL }}
+          GOTIFY_TOKEN: ${{ secrets.GOTIFY_TOKEN }}
+          NTFY_URL: ${{ secrets.NTFY_URL }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          HTTP_PROXY: ${{ secrets.HTTP_PROXY }}
+          HTTPS_PROXY: ${{ secrets.HTTPS_PROXY }}
+        run: |
+          platforms=""
+          if [ "${{ inputs.run_wps }}" != "false" ]; then
+            platforms="${platforms:+$platforms,}wps"
+          fi
+          if [ "${{ inputs.run_agentrouter }}" != "false" ]; then
+            platforms="${platforms:+$platforms,}agentrouter"
+          fi
+          if [ "${{ inputs.run_trae }}" != "false" ]; then
+            platforms="${platforms:+$platforms,}trae"
+          fi
+          if [ "${{ inputs.run_workbuddy }}" != "false" ]; then
+            platforms="${platforms:+$platforms,}workbuddy"
+          fi
+
+          if [ -z "$platforms" ]; then
+            echo "❌ 未选择任何平台"
+            exit 1
+          fi
+
+          echo "本次执行平台: $platforms"
+          python run_all.py --platforms "$platforms"
+
+      - name: Persist refreshed WorkBuddy token
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_SECRETS_PAT }}
+          WORKBUDDY_JSON: ${{ secrets.WORKBUDDY_JSON }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "ℹ️ 未配置 GH_SECRETS_PAT，跳过 WorkBuddy 令牌回写"
+            echo "   若 WorkBuddy 刷新了 refresh_token，请手动更新 WORKBUDDY_JSON"
+            exit 0
+          fi
+
+          if [ ! -f config/token.json ]; then
+            echo "ℹ️ 未找到 config/token.json，跳过 WorkBuddy 令牌回写"
+            exit 0
+          fi
+
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          config_path = pathlib.Path("config/token.json")
+          try:
+              config = json.loads(config_path.read_text(encoding="utf-8"))
+          except Exception as exc:
+              raise SystemExit(f"读取 config/token.json 失败: {exc}")
+
+          node = config.get("workbuddy")
+          if not isinstance(node, dict) or not node.get("accounts"):
+              print("ℹ️ 未配置 WorkBuddy，跳过令牌回写")
+              raise SystemExit(0)
+
+          def normalize(value):
+              return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+          raw = os.environ.get("WORKBUDDY_JSON", "").strip()
+          if not raw:
+              print("ℹ️ 未配置 WORKBUDDY_JSON，跳过令牌回写")
+              raise SystemExit(0)
+
+          try:
+              original = json.loads(raw)
+          except json.JSONDecodeError:
+              original = {}
+          if isinstance(original, dict) and "accounts" not in original:
+              nested = original.get("workbuddy")
+              if isinstance(nested, dict):
+                  original = nested
+
+          if normalize(node) == normalize(original):
+              print("ℹ️ WorkBuddy 令牌未发生变化，无需更新 Secret")
+              raise SystemExit(0)
+
+          pathlib.Path("/tmp/workbuddy.json").write_text(
+              json.dumps(node, ensure_ascii=False, indent=2),
+              encoding="utf-8",
+          )
+          print("🔄 检测到 WorkBuddy 令牌变化，准备更新 WORKBUDDY_JSON")
+          PY
+
+          if [ -f /tmp/workbuddy.json ]; then
+            gh secret set WORKBUDDY_JSON --repo "${GITHUB_REPOSITORY}" --body-file /tmp/workbuddy.json
+            rm -f /tmp/workbuddy.json
+            echo "✅ WORKBUDDY_JSON 已更新"
+          fi
