@@ -1,10 +1,10 @@
 name: Daily Check-in
 
 on:
-  schedule:
+  #schedule:
     # GitHub Actions 使用 UTC；22:37 UTC = 北京时间次日 06:37
     # 刻意避开整点和 UTC 00:00 的高峰队列
-    - cron: '37 22 * * *'
+    # - cron: '37 22 * * *'
 
   workflow_dispatch:
     inputs:
